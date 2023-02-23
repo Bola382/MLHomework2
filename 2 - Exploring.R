@@ -21,9 +21,8 @@ raw_data %>% select(last_col()) %>% table %>% prop.table()
 dat_features = raw_data %>% select(-last_col())
 dat_class = raw_data %>% select(last_col()) 
 
-MVN::mvn(dat_features[raw_data$class=="DH",])$multivariateNormality
+MVN::mvn(dat_features[raw_data$class=="AB",])$multivariateNormality
 MVN::mvn(dat_features[raw_data$class=="NO",])$multivariateNormality
-MVN::mvn(dat_features[raw_data$class=="SL",])$multivariateNormality
 
 # ----------------------------------
 # plots
