@@ -2,7 +2,7 @@ setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 rm(list=ls())
 # reading dataset
 
-raw_data = read.table("data/column_3C.dat",h=F,sep=" ",dec='.')
+raw_data = read.table("data/column_2C.dat",h=F,sep=" ",dec='.')
 View(raw_data)
 
 colnames(raw_data) = c("pelIncidence",
