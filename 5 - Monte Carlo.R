@@ -1,129 +1,139 @@
 rm(list=ls())
 load("var select.RData")
-library(rminer);suppressMessages(library(dplyr))
+library(rminer);suppressMessages(library(dplyr));library(ggplot2)
 
-dat_class = dat_class$class %>% factor # target
+dat_class    = dat_class$class %>% factor  # target variable
+tmp_methods = c("KNN","DT","SVM","LR")     # list of methods used accoring to rminer syntax
+tmp_lmeth   = length(tmp_methods)          # number of methods
+tmp_classf  = c("knn","dt","svm","lr")     # list of methods used accoring to rminer syntax
+tmp_M       = 100                          # monte carlo reps
+
+# ---------------------------
+# training and test sets
+# ---------------------------
+
+tmp_Xtr = tmp_Xts = tmp.ica_Xtr = tmp.ica_Xts = tmp_Ytr = tmp_Yts = list()
+set.seed(1)
+for(i in 1:tmp_M){
+ tmp_index = holdout(dat_class,ratio=1/3) # 1/3 in training set i.e 30%
+ tmp_Xtr[[i]]     = dat_features[tmp_index$tr,]
+ tmp_Xts[[i]]     = dat_features[tmp_index$ts,]
+ tmp.ica_Xtr[[i]] = dat_ICAfeatures[tmp_index$tr,]
+ tmp.ica_Xts[[i]] = as.data.frame(dat_ICAfeatures[tmp_index$ts,])
+ colnames(tmp.ica_Xts[[i]]) = 1:6
+ tmp_Ytr[[i]]     = dat_class[tmp_index$tr]
+ tmp_Yts[[i]]     = dat_class[tmp_index$ts]
+}
 
 # ==============================================================================
 #                             Original features
 # ==============================================================================
 
-X = data %>% select(-last_col())
-Y = data %>% select(last_col()) %>% unlist %>% rmnames %>% factor
-n = nrow(X)
-m = 100 # reps monte carlo
+# stores the metrics for each method
+# array, 1st dimension gives the method, 2nd gives the metric and 3rd gives the 
+# mc rep
+dat.org_mtrc = array(NA,dim = c(tmp_lmeth,2,tmp_M),dimnames=list(tmp_methods,c("Taxa de erro","AUC"),1:tmp_M))#lapply(1:tmp_lmeth, function(a) matrix(NA,nrow=tmp_M,ncol=2,dimnames = list(1:tmp_M,c("errorRt","AUC"))))
 
-methods = c("KNN","DT","SVM","MULTINOM")
-lmeth = length(methods)
+# ---------------------------
+# holdout with MC
+# ---------------------------
 
-tx_erro = matrix(NA, m, lmeth,
-                 dimnames = list(1:m,methods))
+tmp_pb <- txtProgressBar(min = 0,max = tmp_M,style = 3,width = 50,char = "=") # progress bar
+for(i in 1:tmp_M){
+ tmp.org_x = cbind.data.frame(tmp_Xtr[[i]],class=tmp_Ytr[[i]])
+ for(j in 1:tmp_lmeth){
+  tmp.org_mod  = fit(class~.,data=tmp.org_x,model=tmp_classf[j],task="c")
+  tmp.org_mod2 = fit(class~.,data=tmp.org_x,model=tmp_classf[j],task="p")
+  
+  tmp.org_yhat = predict(tmp.org_mod,tmp_Xts[[i]])  # class predictions
+  tmp.org_phat = predict(tmp.org_mod2,tmp_Xts[[i]]) # prob predictions
+  
+  dat.org_mtrc[j,1,i] = mmetric(tmp_Yts[[i]],tmp.org_yhat,metric="CE")  # error rate 
+  dat.org_mtrc[j,2,i] = mmetric(tmp_Yts[[i]],tmp.org_phat,metric="AUC") # AUC
+ }
+ setTxtProgressBar(tmp_pb, i)
+};close(tmp_pb);beepr::beep()
 
-# Balanced holdout
-pp = .5
+# ---------------------------
+# MC estimates
+# ---------------------------
 
-id_tr = matrix(NA,nrow=m,ncol=round(pp*n, 0))
-
-Xtr = Xts = Ytr = Yts = vector(mode="list",length = m)
-
-set.seed(1)
-for(i in 1:m){
- id_tr[i,] = sample(1:n, size = trunc(pp*n), replace = FALSE)
- 
- # 1 - Conjunto de Treino e Teste
- 
- Xtr[[i]] = X[ id_tr[i,],]  # Treino
- Xts[[i]] = X[-id_tr[i,],]  # Teste
- Ytr[[i]] = Y[ id_tr[i,]]
- Yts[[i]] = Y[-id_tr[i,]]
-}
-
-# barra de probresso
-pb <- txtProgressBar(min = 0,      # Minimum value of the progress bar
-                     max = m, # Maximum value of the progress bar
-                     style = 3,    # Progress bar style (also available style = 1 and style = 2)
-                     width = 50,   # Progress bar width. Defaults to getOption("width")
-                     char = "=")   # Character used to create the bar
-tm = proc.time()[3]
-for(k in 1:m){
- # 2 - Model
- 
- dbtreino = cbind.data.frame(Xtr[[k]], classe = Ytr[[k]])
- dbteste  = cbind.data.frame(Xts[[k]], classe = Yts[[k]])
- 
- mod5NN   = fit(classe ~ ., data = dbtreino,
-                model = "knn", task = "c",k=5)
- mod10NN   = fit(classe ~ ., data = dbtreino,
-                 model = "knn", task = "c",k=10)
- mod15NN   = fit(classe ~ ., data = dbtreino,
-                 model = "knn", task = "c",k=15)
- modNNB   = fit(classe ~ ., data = dbtreino,
-                model = "naiveBayes", task = "c")
- modLDA   = fit(classe ~ ., data = dbtreino,
-                model = "lda", task = "c")
- #modQDA   = fit(classe ~ ., data = dbtreino,
- #               model = "qda", task = "c")
- modDT   = fit(classe ~ ., data = dbtreino,
-               model = "dt", task = "c")
- modSVM   = fit(classe ~ ., data = dbtreino,
-                model = "svm", task = "c")
- modMULTINOM   = fit(classe ~ ., data = dbtreino,
-                     model = "multinom", task = "c")
- # 3 - Avaliation
- 
- Ypred5NN   = predict(mod5NN, dbteste)
- Ypred10NN   = predict(mod10NN, dbteste)
- Ypred15NN  = predict(mod15NN, dbteste)
- YpredNNB   = predict(modNNB, dbteste)
- YpredLDA   = predict(modLDA, dbteste)
- #YpredQDA  = predict(modQDA, dbteste)
- YpredDT    = predict(modDT, dbteste)
- YpredSVM   = predict(modSVM, dbteste)
- YpredMULTINOM  = predict(modMULTINOM, dbteste)
- 
- tx_erro[k,"5NN"] = (1 - sum(diag(prop.table(table(Yts[[k]], Ypred15NN))))) * 100
- tx_erro[k,"10NN"] = (1 - sum(diag(prop.table(table(Yts[[k]], Ypred10NN))))) * 100
- tx_erro[k,"15NN"] = (1 - sum(diag(prop.table(table(Yts[[k]], Ypred15NN))))) * 100
- tx_erro[k,"NNB"] = (1 - sum(diag(prop.table(table(Yts[[k]], YpredNNB))))) * 100
- tx_erro[k,"LDA"] = (1 - sum(diag(prop.table(table(Yts[[k]], YpredLDA))))) * 100
- #tx_erro[k,"QDA"] = (1 - sum(diag(prop.table(table(Yts[[k]], YpredQDA))))) * 100
- tx_erro[k,"DT"] = (1 - sum(diag(prop.table(table(Yts[[k]], YpredDT))))) * 100
- tx_erro[k,"SVM"] = (1 - sum(diag(prop.table(table(Yts[[k]], YpredSVM))))) * 100
- tx_erro[k,"MULTINOM"] = (1 - sum(diag(prop.table(table(Yts[[k]], YpredMULTINOM))))) * 100
- setTxtProgressBar(pb, k)
-};print(proc.time()[3]-tm);beepr::beep()
+apply(dat.org_mtrc,c(1,2),mean)              # means
+apply(dat.org_mtrc,c(1,2),sd)                # standard deviation
+apply(dat.org_mtrc,c(1,2),moments::skewness) # skewness
+apply(dat.org_mtrc,c(1,2),moments::kurtosis) # kurtosis
 
 
-# MC estimate
+# producing a dataframe indicating the method on the 1st column,
+# CE on the 2nd and AUC on the 3rd. With tmp_M reps for each method
+tmp.org_forgraphs = t(dat.org_mtrc[1,,])
 
-colMeans(tx_erro)
-apply(tx_erro, 2, FUN = sd)
-apply(tx_erro, 2, FUN = function(a) sd(a)/mean(a)*100)
-apply(tx_erro, 2, FUN = moments::skewness)
+for(i in 2:tmp_lmeth){tmp.org_forgraphs=rbind(tmp.org_forgraphs,t(dat.org_mtrc[i,,]))}
 
-boxplot(tx_erro)
-boxplot(tx_erro[,-4])
+tmp.org_forgraphs = cbind.data.frame(Modelos=rep(tmp_methods,each=tmp_M),tmp.org_forgraphs,row.names = 1:(tmp_lmeth*tmp_M))
 
-mt = rep(methods,each=100)
-tx_erro2 = cbind.data.frame(rate=as.vector(tx_erro),Modelo=mt)
+# violin plot for error rate
+ggplot(tmp.org_forgraphs, aes(x=Modelos, y=`Taxa de erro`,fill=Modelos)) + 
+ geom_violin(trim=F) + geom_boxplot(width=.1) + ylim(5,31) + theme_light()
+# violin plot for AUC
+ggplot(tmp.org_forgraphs, aes(x=Modelos, y=AUC,fill=Modelos)) + 
+ geom_violin(trim=F) + geom_boxplot(width=.1) + ylim(.5,1) + theme_light()
 
-ggplot(tx_erro2, aes(x=rate, color=Modelo, fill=Modelo)) +
- geom_histogram(aes(y=after_stat(density)), position="identity", alpha=0.5)+
- geom_density(alpha=0.6)+
- labs(title="",x="Taxa de erro", y = "Densidade")+
- theme_classic()
-
-tx_erro3 = tx_erro2[-which(tx_erro2=="NNB",arr.ind = T)[,1],]
-
-ggplot(tx_erro3, aes(x=rate, color=Modelo, fill=Modelo)) +
- #geom_histogram(aes(y=after_stat(density)), position="identity", alpha=0.5)+
- geom_density(alpha=0.6)+
- labs(title="",x="Taxa de erro", y = "Densidade")+
- theme_classic()
+rm(list = ls(pattern="tmp.org_"),"i","j")
 
 # ==============================================================================
 #                          ICA transformed features
 # ==============================================================================
+
+# stores the metrics for each method
+# array, 1st dimension gives the method, 2nd gives the metric and 3rd gives the 
+# mc rep
+dat.ica_mtrc = array(NA,dim = c(tmp_lmeth,2,tmp_M),dimnames=list(tmp_methods,c("Taxa de erro","AUC"),1:tmp_M))#lapply(1:tmp_lmeth, function(a) matrix(NA,nrow=tmp_M,ncol=2,dimnames = list(1:tmp_M,c("errorRt","AUC"))))
+
+# ---------------------------
+# holdout with MC
+# ---------------------------
+
+tmp_pb <- txtProgressBar(min = 0,max = tmp_M,style = 3,width = 50,char = "=") # progress bar
+for(i in 1:tmp_M){
+ tmp.ica_x = cbind.data.frame(tmp.ica_Xtr[[i]],class=tmp_Ytr[[i]])
+ for(j in 1:tmp_lmeth){
+  tmp.ica_mod  = fit(class~.,data=tmp.ica_x,model=tmp_classf[j],task="c")
+  tmp.ica_mod2 = fit(class~.,data=tmp.ica_x,model=tmp_classf[j],task="p")
+  
+  tmp.ica_yhat = predict(tmp.ica_mod,tmp.ica_Xts[[i]])  # class predictions
+  tmp.ica_phat = predict(tmp.ica_mod2,tmp.ica_Xts[[i]]) # prob predictions
+  
+  dat.ica_mtrc[j,1,i] = mmetric(tmp_Yts[[i]],tmp.ica_yhat,metric="CE")  # error rate 
+  dat.ica_mtrc[j,2,i] = mmetric(tmp_Yts[[i]],tmp.ica_phat,metric="AUC") # AUC
+ }
+ setTxtProgressBar(tmp_pb, i)
+};close(tmp_pb);beepr::beep()
+
+# ---------------------------
+# MC estimates
+# ---------------------------
+
+apply(dat.ica_mtrc,c(1,2),mean)              # means
+apply(dat.ica_mtrc,c(1,2),sd)                # standard deviation
+apply(dat.ica_mtrc,c(1,2),moments::skewness) # skewness
+apply(dat.ica_mtrc,c(1,2),moments::kurtosis) # kurtosis
+
+
+# producing a dataframe indicating the method on the 1st column,
+# CE on the 2nd and AUC on the 3rd. With tmp_M reps for each method
+tmp.ica_forgraphs = t(dat.ica_mtrc[1,,])
+
+for(i in 2:tmp_lmeth){tmp.ica_forgraphs=rbind(tmp.ica_forgraphs,t(dat.ica_mtrc[i,,]))}
+
+tmp.ica_forgraphs = cbind.data.frame(Modelos=rep(tmp_methods,each=tmp_M),tmp.ica_forgraphs,row.names = 1:(tmp_lmeth*tmp_M))
+
+# violin plot for error rate
+ggplot(tmp.ica_forgraphs, aes(x=Modelos, y=`Taxa de erro`,fill=Modelos)) + 
+ geom_violin(trim=F) + geom_boxplot(width=.1) + ylim(5,45) + theme_light()
+# violin plot for AUC
+ggplot(tmp.ica_forgraphs, aes(x=Modelos, y=AUC,fill=Modelos)) + 
+ geom_violin(trim=F) + geom_boxplot(width=.1) + ylim(.5,1) + theme_light()
 
 # ==============================================================================
 #                         LDA err selected features
